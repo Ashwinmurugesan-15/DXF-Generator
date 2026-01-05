@@ -1,9 +1,38 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed  # Used to run DXF generation tasks concurrently
 import ezdxf  # DXF library for reading/writing DXF files
 from typing import Dict, Any
+import functools
+import hashlib
+from dxf_generator.config.env_config import config
 
 class DXFService:
-    _executor = ThreadPoolExecutor(max_workers=8)  # Thread pool to handle multiple DXF generations in parallel
+    _executor = ThreadPoolExecutor(max_workers=config.MAX_THREADS)  # Thread pool from environment config
+    _parse_cache = {}  # Simple in-memory cache for parsed files
+    _generation_cache = {}  # Cache for generated DXF binary content
+
+    @classmethod
+    def save_cached(cls, component, filename: str) -> bytes:
+        """
+        Generate DXF with caching. If parameters are identical, returns cached bytes.
+        """
+        # Create a unique key based on component data
+        cache_key = f"{component.__class__.__name__}_{hash(frozenset(component.data.items()))}"
+        
+        if cache_key in cls._generation_cache:
+            return cls._generation_cache[cache_key]
+        
+        # Generate to a temporary path or handle in-memory
+        # For simplicity with ezdxf, we still save to disk then read back
+        component.generate_dxf(filename)
+        with open(filename, 'rb') as f:
+            content = f.read()
+            
+        cls._generation_cache[cache_key] = content
+        # Eviction
+        if len(cls._generation_cache) > 100:
+            cls._generation_cache.pop(next(iter(cls._generation_cache)))
+            
+        return content
 
     @staticmethod
     def save(component, filename: str):
@@ -34,16 +63,29 @@ class DXFService:
         return generated_files  # Return list of generated DXF files
 
     @staticmethod
-    def parse(filepath: str) -> Dict[str, Any]:
+    def _get_file_hash(filepath: str) -> str:
+        """Calculate MD5 hash of a file."""
+        hasher = hashlib.md5()
+        with open(filepath, 'rb') as f:
+            for chunk in iter(lambda: f.read(4096), b""):
+                hasher.update(chunk)
+        return hasher.hexdigest()
+
+    @classmethod
+    def parse(cls, filepath: str) -> Dict[str, Any]:
         """
         Parses a DXF file and extracts dimensions for I-Beam or Column.
-        Analyzes LWPOLYLINE geometry to identify component type and dimensions.
+        Uses an internal cache to avoid re-parsing the same file content.
         """
         try:
+            file_hash = cls._get_file_hash(filepath)
+            if file_hash in cls._parse_cache:
+                return cls._parse_cache[file_hash]
+
             doc = ezdxf.readfile(filepath)
             msp = doc.modelspace()
             
-            # Find the main profile (assuming it's the first LWPOLYLINE)
+            # ... rest of the logic ...
             polylines = msp.query('LWPOLYLINE')
             if not polylines:
                 raise ValueError("No LWPOLYLINE found in DXF")
@@ -51,21 +93,15 @@ class DXFService:
             polyline = polylines[0]
             points = list(polyline.get_points())
             
-            # LWPOLYLINE points are usually (x, y, start_width, end_width, bulge)
-            
+            result = None
             # I-Beam has 12 or 13 points (if closed)
             if len(points) in [12, 13]:
-                # Extract I-Beam dimensions based on drawing.py logic
-                # b (flange_width) is at points[1][0]
-                # tf (flange_thickness) is at points[2][1]
-                # h (total_depth) is at points[6][1]
-                # tw (web_thickness) is derived: points[4][0] = (b+tw)/2 => tw = 2*points[4][0] - b
                 b = points[1][0]
                 tf = points[2][1]
                 h = points[6][1]
                 tw = 2 * points[4][0] - b
                 
-                return {
+                result = {
                     "type": "ibeam",
                     "data": {
                         "total_depth": round(float(h), 2),
@@ -77,11 +113,10 @@ class DXFService:
             
             # Column has 4 or 5 points (if closed)
             elif len(points) in [4, 5]:
-                # Extract Column dimensions: points[1][0] is width, points[2][1] is height
                 width = points[1][0]
                 height = points[2][1]
                 
-                return {
+                result = {
                     "type": "column",
                     "data": {
                         "width": round(float(width), 2),
@@ -89,8 +124,15 @@ class DXFService:
                     }
                 }
             
-            else:
-                raise ValueError(f"Unexpected number of vertices ({len(points)}). Only standard I-Beams and Columns are supported.")
+            if result:
+                # Cache the result before returning
+                cls._parse_cache[file_hash] = result
+                # Keep cache size reasonable (simple eviction)
+                if len(cls._parse_cache) > 100:
+                    cls._parse_cache.pop(next(iter(cls._parse_cache)))
+                return result
+            
+            raise ValueError(f"Unexpected number of vertices ({len(points)}). Only standard I-Beams and Columns are supported.")
                 
         except Exception as e:
             if isinstance(e, ValueError):

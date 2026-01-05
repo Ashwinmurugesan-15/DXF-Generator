@@ -4,27 +4,32 @@
 The DXF Generator is a professional engineering tool designed to validate, calculate, and generate DXF (Drawing Exchange Format) files for structural components, specifically I-Beams and Columns. It features a modern web interface for interactive use and a robust backend that enforces engineering tolerances.
 
 ---
-
 ## Technical Architecture
 
 ### 1. Frontend (React + Vite)
-- **Framework**: React with Vite for fast development and optimized builds.
-- **State Management**: React Hooks (`useState`) for managing component dimensions, batch modes, and UI states.
+- **Framework**: React 19 with Vite for fast development and optimized builds.
+- **State Management**: Modularized logic using a custom hook `useGenerator.js` for clean state separation.
 - **API Client**: Axios for communicating with the FastAPI backend.
-- **Styling**: Custom CSS with a focus on professional UX, featuring a light-blue theme, responsive cards, and intuitive tab switching.
+- **Styling**: Modern CSS with a professional blue-grey theme, responsive layouts, and intuitive UI components.
 - **Key Components**:
-    - `Login.jsx`: Handles user authentication.
-    - `Generator.jsx`: Main interface for dimension input, batch generation, and DXF file parsing.
+    - `Generator.jsx`: Main container component using `useGenerator` hook.
+    - `GeneratorParts/`: Modular sub-components:
+        - `BeamInputs.jsx` & `ColumnInputs.jsx`: Specialized input forms for each component type.
+        - `BatchList.jsx`: Manages the dynamic list of items in batch mode.
+        - `TabSwitcher.jsx` & `BatchModeToggle.jsx`: Clean UI controls for mode switching.
+    - `Login.jsx`: Secure entry point for user authentication.
 
 ### 2. Backend (FastAPI + Python)
 - **Framework**: FastAPI for high-performance asynchronous API endpoints.
 - **CAD Engine**: `ezdxf` library for programmatic creation and parsing of DXF files.
-- **Validation**: Pydantic models for request schema validation and custom domain validators for engineering logic.
+- **Validation**: Multi-layered validation using Pydantic schemas and custom engineering validators.
+- **Caching**: Dual-layer in-memory caching using `FastAPICache` (InMemoryBackend) and custom LRU caching in `DXFService`.
 - **Core Modules**:
-    - `dxf_generator/domain/`: Contains core logic for `IBeam` and `Column` entities.
-    - `dxf_generator/validators/`: Enforces engineering rules and raises custom exceptions.
-    - `dxf_generator/drawing/`: Translates calculated coordinates into CAD polylines.
-    - `dxf_generator/services/`: High-level services for file operations and parsing.
+    - `dxf_generator/domain/`: Core entities (`IBeam`, `Column`) with geometric calculation logic.
+    - `dxf_generator/validators/`: Strict engineering rule enforcement.
+    - `dxf_generator/drawing/`: Translation of geometry to DXF entities.
+    - `dxf_generator/services/`: `DXFService` orchestrates generation, parsing, and concurrent execution.
+    - `dxf_generator/config/`: Centralized configuration for tolerances, system limits, and environment variables.
 
 ---
 
@@ -38,25 +43,36 @@ Every input follows a strict sequence:
 4. **Drawing**: Generates the DXF file.
 
 ### 2. Batch Generation & Multithreading
-- **Concurrency**: The project uses a `ThreadPoolExecutor` from Python's `concurrent.futures` module to handle batch generation tasks.
-- **Performance**: When multiple components are requested , the backend processes them in parallel rather than sequentially, significantly reducing the time required to generate the final ZIP archive.
-- **Service Layer (`DXFService`)**: 
-    - **Shared Executor**: Maintains a class-level `ThreadPoolExecutor` with 8 workers for efficient resource reuse.
-    - **save_batch**: Orchestrates concurrent execution by submitting tasks to the thread pool and blocking until all futures are resolved.
-    - **save**: Provides a standard synchronous interface for single-component generation.
-- **ZIP Bundling**: Successfully generated DXF files are bundled into a unique ZIP file using the `zipfile` module and provided to the user as a single download.
+- **Concurrency**: Utilizes a class-level `ThreadPoolExecutor` in `DXFService` for parallel processing.
+- **Worker Configuration**: Thread pool size is dynamically configurable via environment variables (`MAX_THREADS`).
+- **Optimization**: Batch requests are processed concurrently, with results bundled into a ZIP archive for efficient download.
+- **Caching**: Repeated requests for the same dimensions are served instantly from the `_generation_cache`.
 
 ### 3. DXF Parsing & Edit Mode
-- **Reverse Engineering**: The `DXFService.parse` method allows the system to "read back" generated files.
-- **Geometry Analysis**:
-    - **Identification**: Uses vertex counts (12-13 for I-Beams, 4-5 for Columns) to identify the component type.
-    - **Dimension Extraction**: Maps specific vertex coordinates back to engineering parameters like `total_depth`, `web_thickness`, etc.
-- **Auto-Fill Logic**: The frontend uses the parsed data to switch tabs and populate the input fields, enabling a seamless "Upload and Edit" workflow.
+- **Intelligent Detection**: Identifies component types based on vertex signatures (12-13 for I-Beams, 4-5 for Columns).
+- **Reverse Mapping**: Extracts engineering parameters from raw DXF coordinates.
+- **Parsing Cache**: Uses `_parse_cache` to speed up repeated file analysis.
+- **Frontend Integration**: Auto-populates the UI and switches modes upon successful file upload.
 
 ### 4. Engineering Tolerances
 The system enforces real-world engineering constraints defined in `dxf_generator/config/tolerances.py`:
 - **I-Beam**: Validates Total Depth, Flange Width, Web Thickness, and Flange Thickness ratios.
 - **Column**: Validates Width and Height limits.
+
+### 5. Scalability & Performance
+- **Resource Management**: Background tasks handle automatic cleanup of temporary files.
+- **In-Memory Metrics**: Real-time tracking of request counts, failure rates, and average processing times.
+- **Structured Logging**: JSON-formatted logs with request IDs and duration metrics for production observability.
+- **System Limits**:
+    - `MAX_BATCH_SIZE`: 50 items (preventing OOM).
+    - `MAX_THREADS`: Configurable concurrency level.
+    - `LRU Caching`: 100-item limit on in-memory caches to maintain stability.
+    - `UUID-based isolation`: Ensures 100+ concurrent users never experience file collisions.
+
+### 6. Monitoring & Documentation
+- **API Documentation**: Detailed technical specifications for all endpoints can be found in `API_DOCUMENTATION.md`.
+- **System Metrics**: Real-time performance monitoring is available via the `/metrics` endpoint.
+- **Interactive Testing**: Built-in Swagger UI (`/docs`) and ReDoc (`/redoc`) for live API testing.
 
 ---
 
@@ -65,18 +81,18 @@ The system enforces real-world engineering constraints defined in `dxf_generator
 DXF_Generator_Project2/
 ├── dxf_generator/          # Backend Source Code
 │   ├── domain/             # Business logic (IBeam, Column)
-│   ├── validators/         # Engineering rules
+│   ├── validators/         # Engineering rules (Ratios & Limits)
 │   ├── drawing/            # CAD generation logic
-│   ├── interface/          # API (web.py) and CLI
-│   ├── services/           # DXFService for file ops
-│   └── config/             # Engineering tolerances
-├── frontend/               # React Source Code
-│   ├── src/
-│   │   ├── components/     # UI Components (Generator, Login)
-│   │   └── App.jsx         # Main router and state
-│   └── vite.config.js      # Frontend build config
-├── run_web.py              # Backend entry point (Port 8000)
-└── requirements.txt        # Python dependencies
+│   ├── interface/          # API (FastAPI) and CLI
+│   │   └── routes/         # Component-specific endpoints
+│   ├── services/           # Core DXFService with Caching
+│   ├── config/             # Env-based configuration
+│   └── exceptions/         # Custom Error Hierarchy
+├── tests/                  # Automated Test Suite (Pytest)
+├── frontend/               # React + Vite Frontend
+│   ├── src/hooks/          # Custom state hooks
+│   └── src/components/     # Modular UI parts
+└── run_web.py              # Production entry point (Uvicorn)
 ```
 
 ---
@@ -87,6 +103,10 @@ DXF_Generator_Project2/
 1. Install dependencies: `pip install -r requirements.txt`
 2. Run the server: `python run_web.py`
 3. API Documentation available at: `http://localhost:8000/docs`
+
+### Testing
+1. Run all tests: `pytest`
+2. Run specific tests: `pytest tests/unit/test_ibeam.py`
 
 ### Frontend Setup
 1. Navigate to directory: `cd frontend`

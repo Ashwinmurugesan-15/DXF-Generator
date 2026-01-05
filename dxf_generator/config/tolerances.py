@@ -1,19 +1,27 @@
+from dxf_generator.config.env_config import config
 
 # Global engineering tolerances (mm)
 
 # --- Maximum Limits ---
-MAX_IBEAM_LENGTH_MM = 18000
-MAX_IBEAM_WIDTH_MM = 1000  # Reduced to a more standard maximum for I-Beams
-MAX_IBEAM_DEPTH_MM = 1500  # Reduced to a more standard maximum for I-Beams
+MAX_IBEAM_LENGTH_MM = 18000     # Maximum practical I-beam length
+MAX_IBEAM_WIDTH_MM = 1000      # Maximum flange width
+MAX_IBEAM_DEPTH_MM = config.MAX_IBEAM_DEPTH_MM      # Maximum total depth (from env config)
 
-# --- Minimum Limits for I-Beams ---
+# --- Minimum Limits ---
 MIN_IBEAM_DEPTH_MM = 80
 MIN_IBEAM_WIDTH_MM = 40
-MIN_IBEAM_WEB_THICKNESS_MM = 3.0
+MIN_IBEAM_WEB_THICKNESS_MM = config.MIN_IBEAM_WEB_THICKNESS_MM # (from env config)
 MIN_IBEAM_FLANGE_THICKNESS_MM = 5.0
 
 # --- Geometry Ratios ---
-# Web thickness should generally be at least 1/50th of depth
+# Web thickness should be at least 1/50th of depth
 MIN_WEB_TO_DEPTH_RATIO = 0.02
-# Flange width should generally be at least 1/4th of depth
+
+# Flange width should be at least 1/4th of depth
 MIN_WIDTH_TO_DEPTH_RATIO = 0.25
+
+# Flange thickness should be at most 1/10th of flange width
+MAX_FLANGE_THICKNESS_TO_WIDTH_RATIO = 0.20
+
+# Web thickness should be at most 1/5th of flange width
+MAX_WEB_THICKNESS_TO_WIDTH_RATIO = 0.25

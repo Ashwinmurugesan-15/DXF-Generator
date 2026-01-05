@@ -1,18 +1,58 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
+from contextlib import asynccontextmanager
+import time
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from pydantic import BaseModel
-from typing import List
-import os
-import zipfile
-import uuid
+from fastapi_cache import FastAPICache
+from fastapi_cache.backends.inmemory import InMemoryBackend
+from dxf_generator.config.logging_config import logger
+from dxf_generator.interface.routes import ibeam, column, parser
 
-from dxf_generator.domain.ibeam import IBeam
-from dxf_generator.domain.column import Column
-from dxf_generator.services.dxf_service import DXFService
-from dxf_generator.exceptions.base import DXFValidationError
+# Simple in-memory metrics storage
+metrics = {
+    "total_requests": 0,
+    "total_failures": 0,
+    "avg_response_time_ms": 0.0,
+    "total_processing_time_ms": 0.0
+}
 
-app = FastAPI(title="DXF Generator API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Initialize cache
+    FastAPICache.init(InMemoryBackend())
+    yield
+    # Shutdown logic (if any) can go here
+
+app = FastAPI(lifespan=lifespan)
+
+# Performance and Logging Middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.time()
+    
+    response = await call_next(request)
+    
+    process_time = (time.time() - start_time) * 1000  # ms
+    
+    # Update metrics (exclude metrics endpoint itself)
+    if request.url.path != "/metrics":
+        metrics["total_requests"] += 1
+        metrics["total_processing_time_ms"] += process_time
+        metrics["avg_response_time_ms"] = metrics["total_processing_time_ms"] / metrics["total_requests"]
+        if response.status_code >= 400:
+            metrics["total_failures"] += 1
+
+    # Log request details
+    logger.info(
+        f"{request.method} {request.url.path} - {response.status_code} ({process_time:.2f}ms)",
+        extra={
+            "duration_ms": round(process_time, 2),
+            "status_code": response.status_code,
+            "method": request.method,
+            "path": request.url.path
+        }
+    )
+    
+    return response
 
 # Enable CORS
 app.add_middleware(
@@ -23,156 +63,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-class IBeamRequest(BaseModel):
-    total_depth: float
-    flange_width: float
-    web_thickness: float
-    flange_thickness: float
-
-class ColumnRequest(BaseModel):
-    width: float
-    height: float
-
-class BatchIBeamRequest(BaseModel):
-    items: List[IBeamRequest]
-
-class BatchColumnRequest(BaseModel):
-    items: List[ColumnRequest]
-
-def remove_file(path: str):
-    """Helper to remove file after response is sent."""
-    try:
-        if os.path.exists(path):
-            os.remove(path)
-    except Exception as e:
-        print(f"Error removing temporary file {path}: {e}")
-
-def remove_files(paths: List[str]):
-    """Helper to remove multiple files."""
-    for path in paths:
-        remove_file(path)
-
-@app.post("/generate/ibeam")
-async def generate_ibeam(request: IBeamRequest, background_tasks: BackgroundTasks):
-    filename = None
-    try:
-        ibeam = IBeam(
-            request.total_depth, 
-            request.flange_width, 
-            request.web_thickness, 
-            request.flange_thickness
-        )
-        filename = f"ibeam_{int(request.total_depth)}x{int(request.flange_width)}.dxf"
-        DXFService.save(ibeam, filename)
-        
-        if os.path.exists(filename):
-            background_tasks.add_task(remove_file, filename)
-            return FileResponse(
-                path=filename,
-                filename=filename,
-                media_type="application/dxf"
-            )
-        else:
-            raise HTTPException(status_code=500, detail="File generation failed")
-            
-    except DXFValidationError as e:
-        print(f"Validation Error: {str(e)}")
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        print(f"Server Error: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
-
-@app.post("/generate/ibeam/batch")
-async def generate_ibeam_batch(request: BatchIBeamRequest, background_tasks: BackgroundTasks):
-    filenames = []
-    try:
-        for i, item in enumerate(request.items):
-            ibeam = IBeam(item.total_depth, item.flange_width, item.web_thickness, item.flange_thickness)
-            filename = f"ibeam_{i+1}_{int(item.total_depth)}x{int(item.flange_width)}.dxf"
-            DXFService.save(ibeam, filename)
-            filenames.append(filename)
-        
-        zip_filename = f"ibeams_batch_{uuid.uuid4().hex[:8]}.zip"
-        with zipfile.ZipFile(zip_filename, 'w') as zipf:
-            for f in filenames:
-                zipf.write(f)
-        
-        background_tasks.add_task(remove_files, filenames + [zip_filename])
-        return FileResponse(path=zip_filename, filename="ibeams_batch.zip", media_type="application/zip")
-    except Exception as e:
-        remove_files(filenames)
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/generate/column")
-async def generate_column(request: ColumnRequest, background_tasks: BackgroundTasks):
-    try:
-        column = Column(request.width, request.height)
-        filename = f"column_{int(request.width)}x{int(request.height)}.dxf"
-        DXFService.save(column, filename)
-        
-        if os.path.exists(filename):
-            background_tasks.add_task(remove_file, filename)
-            return FileResponse(
-                path=filename,
-                filename=filename,
-                media_type="application/dxf"
-            )
-        else:
-            raise HTTPException(status_code=500, detail="File generation failed")
-            
-    except DXFValidationError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/generate/column/batch")
-async def generate_column_batch(request: BatchColumnRequest, background_tasks: BackgroundTasks):
-    filenames = []
-    try:
-        for i, item in enumerate(request.items):
-            column = Column(item.width, item.height)
-            filename = f"column_{i+1}_{int(item.width)}x{int(item.height)}.dxf"
-            DXFService.save(column, filename)
-            filenames.append(filename)
-        
-        zip_filename = f"columns_batch_{uuid.uuid4().hex[:8]}.zip"
-        with zipfile.ZipFile(zip_filename, 'w') as zipf:
-            for f in filenames:
-                zipf.write(f)
-        
-        background_tasks.add_task(remove_files, filenames + [zip_filename])
-        return FileResponse(path=zip_filename, filename="columns_batch.zip", media_type="application/zip")
-    except Exception as e:
-        remove_files(filenames)
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/parse/dxf")
-async def parse_dxf(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
-    try:
-        # Save uploaded file temporarily
-        temp_filename = f"temp_{uuid.uuid4().hex}_{file.filename}"
-        with open(temp_filename, "wb") as buffer:
-            content = await file.read()
-            buffer.write(content)
-        
-        # Parse the DXF
-        try:
-            result = DXFService.parse(temp_filename)
-            return result
-        finally:
-            # Always clean up temp file
-            if background_tasks:
-                background_tasks.add_task(remove_file, temp_filename)
-            else:
-                remove_file(temp_filename)
-                
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+# Include routers
+app.include_router(ibeam.router, prefix="/api/v1")
+app.include_router(column.router, prefix="/api/v1")
+app.include_router(parser.router, prefix="/api/v1")
 
 @app.get("/")
 async def root():
     return {"message": "DXF Generator API is running"}
+
+@app.get("/metrics")
+async def get_metrics():
+    """Return system performance metrics."""
+    return {
+        "status": "healthy",
+        "metrics": metrics
+    }

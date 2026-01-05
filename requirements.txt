@@ -3,3 +3,7 @@ uvicorn
 ezdxf
 pydantic
 python-multipart
+pytest
+pytest-asyncio
+httpx
+fastapi-cache2
