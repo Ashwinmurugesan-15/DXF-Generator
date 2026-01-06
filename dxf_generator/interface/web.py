@@ -29,7 +29,31 @@ app = FastAPI(lifespan=lifespan)
 async def log_requests(request: Request, call_next):
     start_time = time.time()
     
-    response = await call_next(request)
+    # Debug log for incoming request
+    logger.debug(
+        f"Incoming {request.method} {request.url.path}",
+        extra={
+            "method": request.method,
+            "path": request.url.path,
+            "query_params": str(request.query_params),
+            "client": request.client.host if request.client else None
+        }
+    )
+    
+    try:
+        response = await call_next(request)
+    except Exception as e:
+        process_time = (time.time() - start_time) * 1000
+        logger.error(
+            f"Unhandled exception during {request.method} {request.url.path}: {str(e)}",
+            exc_info=True,
+            extra={
+                "duration_ms": round(process_time, 2),
+                "method": request.method,
+                "path": request.url.path
+            }
+        )
+        raise e from None # Re-raise to let FastAPI handle it
     
     process_time = (time.time() - start_time) * 1000  # ms
     
@@ -41,16 +65,21 @@ async def log_requests(request: Request, call_next):
         if response.status_code >= 400:
             metrics["total_failures"] += 1
 
-    # Log request details
-    logger.info(
-        f"{request.method} {request.url.path} - {response.status_code} ({process_time:.2f}ms)",
-        extra={
-            "duration_ms": round(process_time, 2),
-            "status_code": response.status_code,
-            "method": request.method,
-            "path": request.url.path
-        }
-    )
+    # Log request details with appropriate level
+    log_msg = f"{request.method} {request.url.path} - {response.status_code} ({process_time:.2f}ms)"
+    log_extra = {
+        "duration_ms": round(process_time, 2),
+        "status_code": response.status_code,
+        "method": request.method,
+        "path": request.url.path
+    }
+    
+    if response.status_code >= 500:
+        logger.error(log_msg, extra=log_extra)
+    elif response.status_code >= 400:
+        logger.warning(log_msg, extra=log_extra)
+    else:
+        logger.info(log_msg, extra=log_extra)
     
     return response
 

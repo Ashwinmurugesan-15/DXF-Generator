@@ -1,4 +1,3 @@
-import React from 'react';
 import TabSwitcher from './GeneratorParts/TabSwitcher';
 import BatchModeToggle from './GeneratorParts/BatchModeToggle';
 import UploadZone from './GeneratorParts/UploadZone';

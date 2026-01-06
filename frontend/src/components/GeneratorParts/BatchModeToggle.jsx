@@ -1,5 +1,3 @@
-import React from 'react';
-
 function BatchModeToggle({ isBatchMode, setIsBatchMode }) {
   return (
     <div className="batch-mode">

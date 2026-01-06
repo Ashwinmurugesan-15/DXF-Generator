@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from typing import List
 import uuid
 import zipfile
+import hashlib
 
 from dxf_generator.domain.column import Column
 from dxf_generator.services.dxf_service import DXFService
@@ -24,25 +25,38 @@ class BatchColumnRequest(BaseModel):
 
 @router.post("/column")
 async def generate_column(request: ColumnRequest, background_tasks: BackgroundTasks):
-    filename = None
+    temp_filename = None
+    logger.debug(f"Received Column generation request: {request.dict()}")
     try:
-        logger.info(f"Generating single Column: {request.width}x{request.height}")
         column = Column(request.width, request.height)
-        filename = f"column_{uuid.uuid4().hex[:8]}_{int(request.width)}x{int(request.height)}.dxf"
-        display_name = f"column_{int(request.width)}x{int(request.height)}.dxf"
         
-        # Use cached generation
-        content = DXFService.save_cached(column, filename)
+        # Check cache first to avoid unnecessary UUID generation and disk prep
+        cache_key = DXFService.get_cache_key(column)
+        is_cached = cache_key in DXFService._generation_cache
         
-        if os.path.exists(filename):
-            background_tasks.add_task(remove_file, filename)
+        # Include a short hash in the filename for uniqueness and stability
+        short_hash = hashlib.md5(cache_key.encode()).hexdigest()[:6]
+        display_name = f"column_{int(request.width)}x{int(request.height)}_{short_hash}.dxf"
+        
+        # Use cached generation (internally logs hit/miss)
+        # We pass a temporary filename that only gets used on a cache miss
+        temp_filename = f"temp_{uuid.uuid4().hex[:8]}.dxf"
+        content = DXFService.save_cached(column, temp_filename)
+        
+        if os.path.exists(temp_filename):
+            background_tasks.add_task(remove_file, temp_filename)
             
+        headers = {
+            "Content-Disposition": f'attachment; filename="{display_name}"'
+        }
+        
+        # Add cache status header for visibility
+        headers["X-Cache"] = "HIT" if is_cached else "MISS"
+
         return Response(
             content=content,
             media_type="application/dxf",
-            headers={
-                "Content-Disposition": f'attachment; filename="{display_name}"'
-            }
+            headers=headers
         )
             
     except DXFValidationError as e:
@@ -57,6 +71,7 @@ async def generate_column(request: ColumnRequest, background_tasks: BackgroundTa
 @router.post("/column/batch")
 async def generate_column_batch(request: BatchColumnRequest, background_tasks: BackgroundTasks):
     logger.info(f"Generating batch of {len(request.items)} Columns")
+    logger.debug(f"Batch items: {[item.dict() for item in request.items]}")
     if len(request.items) > MAX_BATCH_SIZE:
         logger.warning(f"Batch size {len(request.items)} exceeds limit {MAX_BATCH_SIZE}")
         raise HTTPException(status_code=400, detail=f"Batch size exceeds maximum limit of {MAX_BATCH_SIZE} items")

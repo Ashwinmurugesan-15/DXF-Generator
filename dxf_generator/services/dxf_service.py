@@ -11,28 +11,44 @@ class DXFService:
     _generation_cache = {}  # Cache for generated DXF binary content
 
     @classmethod
+    def get_cache_key(cls, component) -> str:
+        """Generate a stable cache key for a component."""
+        return f"{component.__class__.__name__}_{hash(frozenset(component.data.items()))}"
+
+    @classmethod
     def save_cached(cls, component, filename: str) -> bytes:
         """
         Generate DXF with caching. If parameters are identical, returns cached bytes.
         """
-        # Create a unique key based on component data
-        cache_key = f"{component.__class__.__name__}_{hash(frozenset(component.data.items()))}"
-        
-        if cache_key in cls._generation_cache:
-            return cls._generation_cache[cache_key]
-        
-        # Generate to a temporary path or handle in-memory
-        # For simplicity with ezdxf, we still save to disk then read back
-        component.generate_dxf(filename)
-        with open(filename, 'rb') as f:
-            content = f.read()
+        from dxf_generator.config.logging_config import logger
+        try:
+            cache_key = cls.get_cache_key(component)
+            logger.debug(f"Checking cache for key: {cache_key}")
             
-        cls._generation_cache[cache_key] = content
-        # Eviction
-        if len(cls._generation_cache) > 100:
-            cls._generation_cache.pop(next(iter(cls._generation_cache)))
+            if cache_key in cls._generation_cache:
+                logger.info(f"Cache hit for {cache_key}. Returning cached content.")
+                return cls._generation_cache[cache_key]
             
-        return content
+            logger.info(f"Cache miss for {cache_key}. Generating new DXF content.")
+            logger.debug(f"Input data for generation: {component.data}")
+            
+            # Generate to a temporary path or handle in-memory
+            # For simplicity with ezdxf, we still save to disk then read back
+            component.generate_dxf(filename)
+            with open(filename, 'rb') as f:
+                content = f.read()
+                
+            cls._generation_cache[cache_key] = content
+            # Eviction
+            if len(cls._generation_cache) > 500: # Increased cache size for more users
+                evicted_key = next(iter(cls._generation_cache))
+                cls._generation_cache.pop(evicted_key)
+                logger.debug(f"Cache eviction: removed {evicted_key}")
+                
+            return content
+        except Exception as e:
+            logger.error(f"Error in save_cached: {str(e)}", exc_info=True)
+            raise e
 
     @staticmethod
     def save(component, filename: str):
@@ -77,18 +93,26 @@ class DXFService:
         Parses a DXF file and extracts dimensions for I-Beam or Column.
         Uses an internal cache to avoid re-parsing the same file content.
         """
+        from dxf_generator.config.logging_config import logger
         try:
+            logger.debug(f"Attempting to parse DXF file: {filepath}")
             file_hash = cls._get_file_hash(filepath)
             if file_hash in cls._parse_cache:
+                logger.info(f"Parse cache hit for {filepath}")
                 return cls._parse_cache[file_hash]
 
+            logger.info(f"Parse cache miss for {filepath}. Reading file.")
             doc = ezdxf.readfile(filepath)
             msp = doc.modelspace()
             
             # ... rest of the logic ...
             polylines = msp.query('LWPOLYLINE')
             if not polylines:
+                logger.warning(f"No LWPOLYLINE found in DXF file: {filepath}")
                 raise ValueError("No LWPOLYLINE found in DXF")
+            
+            # For brevity in logs, we'll log the number of polylines found
+            logger.debug(f"Found {len(polylines)} polylines in DXF")
             
             polyline = polylines[0]
             points = list(polyline.get_points())
@@ -125,16 +149,22 @@ class DXFService:
                 }
             
             if result:
+                logger.info(f"Successfully parsed {result['type']} from {filepath}")
                 # Cache the result before returning
                 cls._parse_cache[file_hash] = result
                 # Keep cache size reasonable (simple eviction)
                 if len(cls._parse_cache) > 100:
-                    cls._parse_cache.pop(next(iter(cls._parse_cache)))
+                    evicted_hash = next(iter(cls._parse_cache))
+                    cls._parse_cache.pop(evicted_hash)
+                    logger.debug(f"Parse cache eviction: removed {evicted_hash}")
                 return result
             
+            logger.warning(f"Unexpected number of vertices ({len(points)}) in {filepath}")
             raise ValueError(f"Unexpected number of vertices ({len(points)}). Only standard I-Beams and Columns are supported.")
                 
         except Exception as e:
-            if isinstance(e, ValueError):
+            if isinstance(e, (ValueError, ezdxf.DXFError)):
+                logger.error(f"Parsing error for {filepath}: {str(e)}")
                 raise e
-            raise ValueError(f"Failed to parse DXF: {str(e)}")
+            logger.error(f"Unexpected error parsing DXF file {filepath}: {str(e)}", exc_info=True)
+            raise ValueError(f"Failed to parse DXF: {str(e)}") from e

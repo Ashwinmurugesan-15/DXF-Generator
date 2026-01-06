@@ -1,5 +1,3 @@
-import React from 'react';
-
 function UploadZone({ onFileUpload, loading }) {
   return (
     <div className="upload-zone">

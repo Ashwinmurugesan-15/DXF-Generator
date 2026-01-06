@@ -10,11 +10,11 @@ class Config:
     # Server Settings
     API_PORT = int(os.getenv("API_PORT", 8000))
     API_HOST = os.getenv("API_HOST", "0.0.0.0")
-    API_WORKERS = int(os.getenv("API_WORKERS", 4))
+    API_WORKERS = int(os.getenv("API_WORKERS", 4)) # Recommended: 2 * CPU Cores + 1
     API_RELOAD = os.getenv("API_RELOAD", "false").lower() == "true"
     
     # Performance Settings
-    MAX_THREADS = int(os.getenv("MAX_THREADS", 8))
+    MAX_THREADS = int(os.getenv("MAX_THREADS", 20)) # Increased for better concurrency
     MAX_BATCH_SIZE = int(os.getenv("MAX_BATCH_SIZE", 50))
     
     # System Paths

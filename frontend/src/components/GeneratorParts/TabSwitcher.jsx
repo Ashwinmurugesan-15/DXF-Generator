@@ -1,5 +1,3 @@
-import React from 'react';
-
 function TabSwitcher({ activeTab, setActiveTab }) {
   return (
     <div className="tab-switcher">

@@ -25,3 +25,11 @@ MAX_FLANGE_THICKNESS_TO_WIDTH_RATIO = 0.20
 
 # Web thickness should be at most 1/5th of flange width
 MAX_WEB_THICKNESS_TO_WIDTH_RATIO = 0.25
+
+# --- Column Limits ---
+MAX_COLUMN_WIDTH_MM = 1500      # Maximum column width for stability
+MAX_COLUMN_HEIGHT_MM = 3000     # Maximum column height for manufacturing
+MIN_COLUMN_WIDTH_MM = 100       # Minimum column width for structural integrity
+MIN_COLUMN_HEIGHT_MM = 200      # Minimum column height for structural integrity
+MAX_COLUMN_ASPECT_RATIO = 3.0   # Height/width ratio limit (prevents overly tall/thin columns)
+MIN_COLUMN_ASPECT_RATIO = 0.33  # Width/height ratio limit (prevents overly wide/short columns)

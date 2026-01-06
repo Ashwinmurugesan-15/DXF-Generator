@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from typing import List
 import uuid
 import zipfile
+import hashlib
 
 from dxf_generator.domain.ibeam import IBeam
 from dxf_generator.services.dxf_service import DXFService
@@ -27,35 +28,44 @@ class BatchIBeamRequest(BaseModel):
 
 @router.post("/ibeam")
 async def generate_ibeam(request: IBeamRequest, background_tasks: BackgroundTasks):
-    filename = None
+    temp_filename = None
+    logger.debug(f"Received I-Beam generation request: {request.dict()}")
     try:
-        logger.info(f"Generating single I-Beam: {request.total_depth}x{request.flange_width}")
         ibeam = IBeam(
             request.total_depth, 
             request.flange_width, 
             request.web_thickness, 
             request.flange_thickness
         )
-        filename = f"ibeam_{uuid.uuid4().hex[:8]}_{int(request.total_depth)}x{int(request.flange_width)}.dxf"
-        display_name = f"ibeam_{int(request.total_depth)}x{int(request.flange_width)}.dxf"
         
-        # Use cached generation
-        content = DXFService.save_cached(ibeam, filename)
+        # Check cache first to avoid unnecessary UUID generation and disk prep
+        cache_key = DXFService.get_cache_key(ibeam)
+        is_cached = cache_key in DXFService._generation_cache
         
-        # If it was a cache hit, the file might not exist or be the same one
-        # but save_cached handles the generation/retrieval.
-        # We can return the bytes directly as a Response to be fast
+        # Include a short hash in the filename for uniqueness and stability
+        short_hash = hashlib.md5(cache_key.encode()).hexdigest()[:6]
+        display_name = f"ibeam_{int(request.total_depth)}x{int(request.flange_width)}_{short_hash}.dxf"
         
-        # We still need to clean up the file if it was just created
-        if os.path.exists(filename):
-            background_tasks.add_task(remove_file, filename)
+        # Use cached generation (internally logs hit/miss)
+        # We pass a temporary filename that only gets used on a cache miss
+        temp_filename = f"temp_{uuid.uuid4().hex[:8]}.dxf"
+        content = DXFService.save_cached(ibeam, temp_filename)
+        
+        # If a file was actually created on disk (cache miss), schedule its removal
+        if os.path.exists(temp_filename):
+            background_tasks.add_task(remove_file, temp_filename)
             
+        headers = {
+            "Content-Disposition": f'attachment; filename="{display_name}"'
+        }
+        
+        # Add cache status header for visibility
+        headers["X-Cache"] = "HIT" if is_cached else "MISS"
+
         return Response(
             content=content,
             media_type="application/dxf",
-            headers={
-                "Content-Disposition": f'attachment; filename="{display_name}"'
-            }
+            headers=headers
         )
             
     except DXFValidationError as e:
@@ -63,13 +73,14 @@ async def generate_ibeam(request: IBeamRequest, background_tasks: BackgroundTask
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Unexpected error generating I-Beam: {str(e)}", exc_info=True)
-        if filename and os.path.exists(filename):
-            remove_file(filename)
+        if temp_filename and os.path.exists(temp_filename):
+            remove_file(temp_filename)
         raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
 
 @router.post("/ibeam/batch")
 async def generate_ibeam_batch(request: BatchIBeamRequest, background_tasks: BackgroundTasks):
     logger.info(f"Generating batch of {len(request.items)} I-Beams")
+    logger.debug(f"Batch items: {[item.dict() for item in request.items]}")
     if len(request.items) > MAX_BATCH_SIZE:
         logger.warning(f"Batch size {len(request.items)} exceeds limit {MAX_BATCH_SIZE}")
         raise HTTPException(

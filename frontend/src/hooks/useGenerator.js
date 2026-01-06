@@ -4,14 +4,12 @@ import axios from 'axios';
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 export function useGenerator() {
-  const [activeTab, setActiveTab] = useState('beam'); // 'beam' or 'column'
+  const [activeTab, setActiveTab] = useState('beam');
   const [isBatchMode, setIsBatchMode] = useState(false);
   
-  // Separate states for Single Mode
   const [beamSingle, setBeamSingle] = useState({ total_depth: '', flange_width: '', web_thickness: '', flange_thickness: '' });
   const [columnSingle, setColumnSingle] = useState({ width: '', height: '' });
   
-  // Separate states for Batch Mode
   const [beamBatch, setBeamBatch] = useState([
     { total_depth: '', flange_width: '', web_thickness: '', flange_thickness: '' }
   ]);
@@ -76,7 +74,7 @@ export function useGenerator() {
 
     try {
         setLoading(true);
-        const response = await axios.post(`${API_BASE_URL}/parse/dxf`, formData, {
+        const response = await axios.post(`${API_BASE_URL}/api/v1/parse`, formData, {
           headers: {
             'Content-Type': 'multipart/form-data',
           },
@@ -158,7 +156,7 @@ export function useGenerator() {
               height: parseFloat(item.height)
             }));
 
-        const endpoint = activeTab === 'beam' ? '/generate/ibeam/batch' : '/generate/column/batch';
+        const endpoint = activeTab === 'beam' ? '/api/v1/ibeam/batch' : '/api/v1/column/batch';
         const response = await axios.post(`${API_BASE_URL}${endpoint}`, { items }, {
           responseType: 'blob',
         });
@@ -188,7 +186,7 @@ export function useGenerator() {
 
       } else {
         const item = activeTab === 'beam' ? beamSingle : columnSingle;
-        const endpoint = activeTab === 'beam' ? '/generate/ibeam' : '/generate/column';
+        const endpoint = activeTab === 'beam' ? '/api/v1/ibeam' : '/api/v1/column';
         const data = activeTab === 'beam' 
           ? {
               total_depth: parseFloat(item.total_depth),

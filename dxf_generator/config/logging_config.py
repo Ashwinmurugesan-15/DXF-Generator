@@ -35,10 +35,13 @@ def setup_logging():
 
     # Base logger
     logger = logging.getLogger("dxf_generator")
-    logger.setLevel(logging.INFO)
+    # Set to DEBUG to capture all levels (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+    logger.setLevel(logging.DEBUG)
 
     # Standard Console Handler (Human readable for development)
     console_handler = logging.StreamHandler(sys.stdout)
+    # Set console to DEBUG to show everything as requested by user
+    console_handler.setLevel(logging.DEBUG)
     console_formatter = logging.Formatter(
         '[%(asctime)s] %(levelname)s in %(module)s: %(message)s'
     )
@@ -47,6 +50,8 @@ def setup_logging():
 
     # JSON File Handler (Structured for production/monitoring)
     file_handler = logging.FileHandler(os.path.join(log_dir, "app.json.log"))
+    # File captures everything including DEBUG and ERROR
+    file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(StructuredFormatter())
     logger.addHandler(file_handler)
 

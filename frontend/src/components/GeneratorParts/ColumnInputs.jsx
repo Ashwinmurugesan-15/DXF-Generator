@@ -1,5 +1,3 @@
-import React from 'react';
-
 function ColumnInputs({ data, onChange, isBatch, onRemove, index }) {
   if (isBatch) {
     return (

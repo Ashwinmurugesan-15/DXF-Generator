@@ -1,4 +1,3 @@
-import React from 'react';
 import BeamInputs from './BeamInputs';
 import ColumnInputs from './ColumnInputs';
 

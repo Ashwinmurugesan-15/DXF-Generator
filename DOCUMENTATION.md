@@ -60,14 +60,25 @@ The system enforces real-world engineering constraints defined in `dxf_generator
 - **Column**: Validates Width and Height limits.
 
 ### 5. Scalability & Performance
+The system is architected to support 100+ concurrent users with high reliability:
+- **Asynchronous API**: Built on FastAPI, the server handles 100s of concurrent connections with minimal overhead.
+- **Thread-Safe Generation**: CPU-bound CAD generation is offloaded to a `ThreadPoolExecutor`, preventing the main event loop from blocking.
 - **Resource Management**: Background tasks handle automatic cleanup of temporary files.
 - **In-Memory Metrics**: Real-time tracking of request counts, failure rates, and average processing times.
 - **Structured Logging**: JSON-formatted logs with request IDs and duration metrics for production observability.
 - **System Limits**:
     - `MAX_BATCH_SIZE`: 50 items (preventing OOM).
-    - `MAX_THREADS`: Configurable concurrency level.
+    - `MAX_THREADS`: Configurable concurrency level (default 32 for high load).
     - `LRU Caching`: 100-item limit on in-memory caches to maintain stability.
     - `UUID-based isolation`: Ensures 100+ concurrent users never experience file collisions.
+
+---
+
+## Production Tuning
+To scale for 100+ concurrent users, adjust the following in `.env`:
+- `API_WORKERS`: Increase based on CPU cores (e.g., `2 * cores + 1`).
+- `MAX_THREADS`: Increase (e.g., `32` or `64`) if batch generation requests are frequent.
+- `MAX_BATCH_SIZE`: Decrease if memory usage per worker is too high.
 
 ### 6. Monitoring & Documentation
 - **API Documentation**: Detailed technical specifications for all endpoints can be found in `API_DOCUMENTATION.md`.
@@ -120,3 +131,18 @@ The project uses custom exceptions to provide detailed feedback:
 - `IBeamSchemaError`: Missing or invalid field types.
 - `IBeamGeometryError`: Dimension violations (e.g., "Web thickness too small").
 - `DXFValidationError`: Base exception for all CAD-related validation issues.
+
+---
+
+## Scalability and Production Readiness
+
+The project is designed to handle high concurrency (e.g., 100+ simultaneous users) through the following optimizations:
+
+- **Asynchronous Core**: Built on FastAPI, the server handles many concurrent I/O connections efficiently.
+- **Concurrent Processing**: CPU-bound DXF generation is offloaded to a `ThreadPoolExecutor` (default: 20 threads) to prevent blocking the main event loop.
+- **Dual Caching**:
+    - **FastAPI Cache**: In-memory response caching for API endpoints.
+    - **DXF Service Cache**: Internal LRU-style cache for generated DXF content (500 item capacity).
+- **Multi-Worker Support**: Configurable via `API_WORKERS` in `env_config.py` (default: 4).
+- **Structured Logging**: JSON-formatted logs with Request IDs for observability in production environments (e.g., ELK stack).
+- **Resource Management**: Background tasks automatically clean up temporary files to prevent disk bloat.
