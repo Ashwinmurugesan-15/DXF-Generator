@@ -27,6 +27,14 @@ class BatchColumnRequest(BaseModel):
 async def generate_column(request: ColumnRequest, background_tasks: BackgroundTasks):
     temp_filename = None
     logger.debug(f"Received Column generation request: {request.dict()}")
+    
+    # Log level demonstration triggers
+    if request.width == 1.11:
+        logger.debug("DEBUG TRIGGER: Detailed diagnostic trace for Column width 1.11")
+    elif request.width == 9.99:
+        logger.error("ERROR TRIGGER: Simulating a critical failure for Column width 9.99")
+        raise Exception("Demonstration of Column ERROR log with full stack trace")
+        
     try:
         column = Column(request.width, request.height)
         
