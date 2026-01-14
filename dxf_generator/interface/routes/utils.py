@@ -1,6 +1,5 @@
 import os
 from typing import List
-
 from dxf_generator.config.logging_config import logger
 
 def remove_file(path: str):
@@ -15,3 +14,4 @@ def remove_files(paths: List[str]):
     """Helper to remove multiple files."""
     for path in paths:
         remove_file(path)
+

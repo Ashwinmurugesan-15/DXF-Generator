@@ -117,11 +117,11 @@ export function useGenerator() {
     setError(null);
     setSuccess(null);
 
-    if (isBatchMode) {
+      if (isBatchMode) {
       const currentItems = activeTab === 'beam' ? beamBatch : columnBatch;
       for (let i = 0; i < currentItems.length; i++) {
         const item = currentItems[i];
-        for (const [key, value] of Object.entries(item)) {
+        for (const [, value] of Object.entries(item)) {
           if (!value || value <= 0) {
             setError(`Please enter a valid positive number for all fields in Row ${i + 1}`);
             setLoading(false);

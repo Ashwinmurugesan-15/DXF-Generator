@@ -1,5 +1,3 @@
-import pytest
-import os
 
 def test_root_endpoint(client):
     """Test the root endpoint."""
@@ -18,13 +16,14 @@ def test_generate_ibeam_endpoint(client):
     response = client.post("/api/v1/ibeam", json=payload)
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/dxf"
-    # Filename should be in the headers
-    assert "ibeam_300x150.dxf" in response.headers["content-disposition"]
+    # Filename should be in the headers (partial match since we add short hash)
+    assert "ibeam_300x150" in response.headers["content-disposition"]
+    assert ".dxf" in response.headers["content-disposition"]
 
 def test_generate_ibeam_invalid_payload(client):
     """Test I-Beam generation with invalid payload."""
     payload = {
-        "total_depth": 10,  # Too small
+        "total_depth": 10,  # Too small 
         "flange_width": 150,
         "web_thickness": 8,
         "flange_thickness": 12
@@ -53,7 +52,9 @@ def test_generate_column_endpoint(client):
     response = client.post("/api/v1/column", json=payload)
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/dxf"
-    assert "column_200x200.dxf" in response.headers["content-disposition"]
+    # Filename should be in the headers (partial match since we add short hash)
+    assert "column_200x200" in response.headers["content-disposition"]
+    assert ".dxf" in response.headers["content-disposition"]
 
 def test_generate_column_batch_endpoint(client):
     """Test the batch Column generation endpoint."""
@@ -75,6 +76,7 @@ def test_generate_ibeam_batch_exceed_limit(client):
     response = client.post("/api/v1/ibeam/batch", json={"items": items})
     assert response.status_code == 400
     assert "Batch size exceeds maximum limit" in response.json()["detail"]
+
 
 def test_generate_column_batch_exceed_limit(client):
     """Test Column batch generation fails when exceeding system limit."""

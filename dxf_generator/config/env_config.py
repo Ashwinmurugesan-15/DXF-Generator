@@ -24,6 +24,17 @@ class Config:
     # Engineering Limits (Allowing environment overrides for existing constants)
     MAX_IBEAM_DEPTH_MM = float(os.getenv("MAX_IBEAM_DEPTH_MM", 1500))
     MIN_IBEAM_WEB_THICKNESS_MM = float(os.getenv("MIN_IBEAM_WEB_THICKNESS_MM", 3.0))
+    
+    # Upload Settings
+    UPLOAD_MAX_SIZE_BYTES = int(os.getenv("UPLOAD_MAX_SIZE_BYTES", 5 * 1024 * 1024)) # 5 MB
+    ALLOWED_UPLOAD_EXTENSIONS = {".dxf"}
+    ALLOWED_UPLOAD_MIME_TYPES = {
+        "application/dxf", 
+        "application/x-dxf", 
+        "image/vnd.dxf", 
+        "text/plain", 
+        "application/octet-stream"
+    }
 
 # Create a singleton instance
 config = Config()

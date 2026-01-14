@@ -1,6 +1,5 @@
 import os
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Response
-from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List
 import uuid
@@ -26,7 +25,7 @@ class BatchColumnRequest(BaseModel):
 @router.post("/column")
 async def generate_column(request: ColumnRequest, background_tasks: BackgroundTasks):
     temp_filename = None
-    logger.debug(f"Received Column generation request: {request.dict()}")
+    logger.debug(f"Received Column generation request: {request.model_dump()}")
     
     # Log level demonstration triggers
     if request.width == 1.11:
@@ -40,7 +39,7 @@ async def generate_column(request: ColumnRequest, background_tasks: BackgroundTa
         
         # Check cache first to avoid unnecessary UUID generation and disk prep
         cache_key = DXFService.get_cache_key(column)
-        is_cached = cache_key in DXFService._generation_cache
+        is_cached = DXFService._generation_cache.contains(cache_key)
         
         # Include a short hash in the filename for uniqueness and stability
         short_hash = hashlib.md5(cache_key.encode()).hexdigest()[:6]
@@ -72,46 +71,90 @@ async def generate_column(request: ColumnRequest, background_tasks: BackgroundTa
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Unexpected error generating Column: {str(e)}", exc_info=True)
-        if filename and os.path.exists(filename):
-            remove_file(filename)
+        if temp_filename and os.path.exists(temp_filename):
+            remove_file(temp_filename)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/column/batch")
 async def generate_column_batch(request: BatchColumnRequest, background_tasks: BackgroundTasks):
     logger.info(f"Generating batch of {len(request.items)} Columns")
-    logger.debug(f"Batch items: {[item.dict() for item in request.items]}")
+    
     if len(request.items) > MAX_BATCH_SIZE:
         logger.warning(f"Batch size {len(request.items)} exceeds limit {MAX_BATCH_SIZE}")
         raise HTTPException(status_code=400, detail=f"Batch size exceeds maximum limit of {MAX_BATCH_SIZE} items")
     
-    filenames = []
     try:
-        components = []
+        # 1. Prepare components to calculate batch key
+        components = [
+            Column(item.width, item.height)
+            for item in request.items
+        ]
+        
+        # 2. Check Batch Cache
+        batch_key = DXFService.get_batch_key(components)
+        cached_zip = DXFService.get_cached_batch(batch_key)
+        
+        if cached_zip:
+            logger.info(f"Batch cache hit for key: {batch_key}")
+            headers = {
+                "Content-Disposition": 'attachment; filename="columns_batch.zip"',
+                "X-Cache": "HIT"
+            }
+            return Response(content=cached_zip, media_type="application/zip", headers=headers)
+
+        # 3. Cache Miss - Generate Files
+        logger.info(f"Batch cache miss for key: {batch_key}. Generating...")
+        
+        filenames = []
         disk_filenames = []
         
-        for i, item in enumerate(request.items):
-            column = Column(item.width, item.height)
+        for i, (item, component) in enumerate(zip(request.items, components)):
             unique_id = uuid.uuid4().hex[:8]
             filename = f"column_{unique_id}_{i+1}_{int(item.width)}x{int(item.height)}.dxf"
             display_name = f"column_{i+1}_{int(item.width)}x{int(item.height)}.dxf"
             
-            components.append(column)
             disk_filenames.append(filename)
             filenames.append((filename, display_name))
         
         DXFService.save_batch(components, disk_filenames)
         
+        # 4. Create ZIP
         zip_filename = f"columns_batch_{uuid.uuid4().hex[:8]}.zip"
         with zipfile.ZipFile(zip_filename, 'w') as zipf:
             for f, d_name in filenames:
-                zipf.write(f, arcname=d_name)
+                if os.path.exists(f):
+                    zipf.write(f, arcname=d_name)
+                else:
+                    logger.error(f"Generated file missing: {f}")
         
-        disk_paths = [f[0] for f in filenames]
-        background_tasks.add_task(remove_files, disk_paths + [zip_filename])
-        logger.info(f"Successfully generated batch zip: {zip_filename}")
-        return FileResponse(path=zip_filename, filename="columns_batch.zip", media_type="application/zip")
+        # 5. Read ZIP bytes for caching and response
+        with open(zip_filename, "rb") as zf:
+            zip_bytes = zf.read()
+            
+        # 6. Cache the result
+        DXFService.cache_batch(batch_key, zip_bytes)
+        
+        # 7. Cleanup
+        # Schedule removal of temp DXF files and the temp ZIP
+        all_temp_files = [f[0] for f in filenames] + [zip_filename]
+        background_tasks.add_task(remove_files, all_temp_files)
+        
+        headers = {
+            "Content-Disposition": 'attachment; filename="columns_batch.zip"',
+            "X-Cache": "MISS"
+        }
+        logger.info(f"Successfully generated and cached batch zip: {zip_filename}")
+        
+        return Response(content=zip_bytes, media_type="application/zip", headers=headers)
+
     except Exception as e:
         logger.error(f"Error in batch Column generation: {str(e)}", exc_info=True)
-        disk_paths = [f[0] if isinstance(f, tuple) else f for f in filenames]
-        remove_files(disk_paths)
+        # Try to cleanup any files that were created
+        try:
+            if 'filenames' in locals():
+                remove_files([f[0] for f in filenames])
+            if 'zip_filename' in locals() and os.path.exists(zip_filename):
+                remove_file(zip_filename)
+        except Exception:
+            pass
         raise HTTPException(status_code=500, detail=str(e))

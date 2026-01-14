@@ -5,14 +5,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi_cache import FastAPICache
 from fastapi_cache.backends.inmemory import InMemoryBackend
 from dxf_generator.config.logging_config import logger
-from dxf_generator.interface.routes import ibeam, column, parser
+from dxf_generator.interface.routes import ibeam, column, parser, tests, benchmark
 
-# Simple in-memory metrics storage
+# Advanced metrics tracking
 metrics = {
     "total_requests": 0,
     "total_failures": 0,
-    "avg_response_time_ms": 0.0,
-    "total_processing_time_ms": 0.0
+    "total_processing_time_ms": 0.0,
+    "start_time": time.time(),
+    "unique_clients": set()
 }
 
 @asynccontextmanager
@@ -23,6 +24,45 @@ async def lifespan(app: FastAPI):
     # Shutdown logic (if any) can go here
 
 app = FastAPI(lifespan=lifespan)
+
+@app.get("/metrics/summary")
+async def get_load_summary():
+    """Generates a simple live performance summary."""
+    try:
+        total_time = time.time() - metrics["start_time"]
+        req_per_sec = metrics["total_requests"] / total_time if total_time > 0 else 0
+        
+        return {
+            "Users": len(metrics["unique_clients"]),
+            "Total Requests": metrics["total_requests"],
+            "Time Taken (sec)": round(total_time, 2),
+            "RPS": round(req_per_sec, 1)
+        }
+    except Exception as e:
+        logger.error(f"Error in get_load_summary: {str(e)}")
+        return {"error": str(e)}
+
+@app.get("/metrics")
+async def get_metrics():
+    """Return system performance metrics."""
+    # Convert set to list for JSON serialization
+    display_metrics = metrics.copy()
+    display_metrics["unique_clients"] = list(metrics["unique_clients"])
+    return {
+        "status": "healthy",
+        "metrics": display_metrics
+    }
+
+@app.get("/")
+async def root():
+    return {"message": "DXF Generator API is running"}
+
+# Register Routers
+app.include_router(ibeam.router, prefix="/api/v1", tags=["ibeam"])
+app.include_router(column.router, prefix="/api/v1", tags=["column"])
+app.include_router(parser.router, prefix="/api/v1", tags=["parser"])
+app.include_router(tests.router, prefix="/api/v1", tags=["tests"])
+app.include_router(benchmark.router, prefix="/api/v1", tags=["benchmark"])
 
 # Performance and Logging Middleware
 @app.middleware("http")
@@ -58,10 +98,11 @@ async def log_requests(request: Request, call_next):
     process_time = (time.time() - start_time) * 1000  # ms
     
     # Update metrics (exclude metrics endpoint itself)
-    if request.url.path != "/metrics":
+    if not request.url.path.startswith("/metrics"):
         metrics["total_requests"] += 1
         metrics["total_processing_time_ms"] += process_time
-        metrics["avg_response_time_ms"] = metrics["total_processing_time_ms"] / metrics["total_requests"]
+        if request.client:
+            metrics["unique_clients"].add(request.client.host)
         if response.status_code >= 400:
             metrics["total_failures"] += 1
 
@@ -96,15 +137,3 @@ app.add_middleware(
 app.include_router(ibeam.router, prefix="/api/v1")
 app.include_router(column.router, prefix="/api/v1")
 app.include_router(parser.router, prefix="/api/v1")
-
-@app.get("/")
-async def root():
-    return {"message": "DXF Generator API is running"}
-
-@app.get("/metrics")
-async def get_metrics():
-    """Return system performance metrics."""
-    return {
-        "status": "healthy",
-        "metrics": metrics
-    }

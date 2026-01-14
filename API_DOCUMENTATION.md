@@ -6,11 +6,11 @@ Welcome to the **DXF Generator Professional API**. This high-performance CAD gen
 
 ## API Overview
 
--API Version: 1.2.0
 Base Path: /api/v1
+
 Supported Formats:
-          JSON → request & response data
-          DXF → individual drawings 
+          JSON → request payloads and parse responses
+          DXF → single drawing downloads
           ZIP → batch downloads
 ---
 
@@ -23,18 +23,17 @@ Required Inputs:
       Flange width (mm)
       Web thickness (mm)
       Flange thickness (mm)
-      Beam length (mm)
+
 What you get:
       A downloadable DXF file
-      validation errors if dimensions are invalid
-
+      Clear validation errors if dimensions are invalid
 ---
 
 ### Generate Multiple I-Beams (Batch)
 Endpoint: POST /ibeam/batch
 Generates multiple I-Beam DXF files at once and returns them as a ZIP archive.
 Limits:
-    Maximum 5 beams per request
+    Maximum batch size is controlled by MAX_BATCH_SIZE (default: 50)
 What you get:
     One ZIP file containing all generated DXFs
 ---
@@ -52,6 +51,8 @@ What you get:
 
 Endpoint: POST /column/batch
 Creates multiple column DXF files and bundles them into a ZIP file.
+Limits:
+    Maximum batch size is controlled by MAX_BATCH_SIZE (default: 50)
 ---
 
 ### 3. DXF Parser
@@ -64,10 +65,19 @@ Typical Output Includes:
       Key dimensions (depth, width, etc.)
       File name and parsing status
       This is useful for verifying drawings or re-using legacy DXF files.
+
+Request Format:
+      multipart/form-data with field name: file
+
+Response Fields:
+      success (true/false)
+      filename (original file name)
+      type (ibeam or column)
+      dimensions (extracted dimensions object)
+      message (human readable status)
 ---
 
 ## Engineering Constraints
-
 To ensure all generated components are structurally valid, the system enforces industry-based constraints:
       Minimum web thickness: 3 mm
       Maximum beam depth: 1500 mm
@@ -100,3 +110,26 @@ It provides operational insights such as:
       Number of failed requests
 This helps with performance tracking and reliability monitoring.
 
+Additional Metrics:
+Endpoint: GET /metrics/summary
+It provides a simplified live performance summary (users, total requests, time taken, RPS).
+
+---
+
+## Root Endpoint
+Endpoint: GET /
+Returns a simple message confirming the API is running.
+
+---
+
+## Development / Internal Endpoints
+These endpoints are intended for development/debugging:
+
+Endpoint: GET /benchmark
+Runs an internal benchmark simulation and returns a formatted text table.
+
+Endpoint: GET /testcases
+Lists discovered test files under the tests directory.
+
+Endpoint: GET /testcases/run/all
+Runs pytest on the server machine and returns combined stdout/stderr.

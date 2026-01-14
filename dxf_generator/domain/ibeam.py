@@ -19,7 +19,7 @@ class IBeam(BaseComponent):
             "flange_thickness": flange_thickness
         }
 
-        # 🔒 Enforce validation immediately (client requirement)
+        #  Enforce validation immediately (client requirement)
         IBeamValidator.validate(self.data)
 
     def generate_dxf(self, filepath: str):
